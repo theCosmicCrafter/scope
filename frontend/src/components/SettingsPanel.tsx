@@ -40,8 +40,9 @@ import type {
 } from "../types";
 import { LoRAManager } from "./LoRAManager";
 import {
-  parseConfigurationFields,
   COMPLEX_COMPONENTS,
+  parseConfigurationFields,
+  parseAllFields,
 } from "../lib/schemaSettings";
 import {
   SchemaComplexField,
@@ -112,6 +113,20 @@ interface SettingsPanelProps {
     value: unknown,
     isRuntimeParam?: boolean
   ) => void;
+  // Preprocessor schema field overrides
+  preprocessorFieldOverrides?: Record<string, unknown>;
+  onPreprocessorFieldOverrideChange?: (
+    key: string,
+    value: unknown,
+    isRuntimeParam?: boolean
+  ) => void;
+  // Postprocessor schema field overrides
+  postprocessorFieldOverrides?: Record<string, unknown>;
+  onPostprocessorFieldOverrideChange?: (
+    key: string,
+    value: unknown,
+    isRuntimeParam?: boolean
+  ) => void;
   isCloudMode?: boolean;
 }
 
@@ -158,6 +173,10 @@ export function SettingsPanel({
   onPostprocessorIdsChange,
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
+  preprocessorFieldOverrides,
+  onPreprocessorFieldOverrideChange,
+  postprocessorFieldOverrides,
+  onPostprocessorFieldOverrideChange,
   isCloudMode = false,
 }: SettingsPanelProps) {
   // Local slider state management hooks
@@ -425,6 +444,55 @@ export function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Preprocessor Schema Fields */}
+          {preprocessorIds.length > 0 &&
+            pipelines?.[preprocessorIds[0]]?.configSchema &&
+            (() => {
+              const preSchema = pipelines[preprocessorIds[0]]
+                .configSchema as unknown as import("../lib/schemaSettings").ConfigSchemaLike;
+              const preFields = parseAllFields(preSchema, inputMode);
+              if (preFields.length === 0) return null;
+              return (
+                <div className="rounded-lg border bg-card p-3 space-y-3 mt-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {pipelines[preprocessorIds[0]].name} Settings
+                  </p>
+                  {preFields.map(({ key, prop, ui, fieldType }) => {
+                    const value =
+                      preprocessorFieldOverrides?.[key] ?? prop.default;
+                    const isRuntimeParam = ui.is_load_param === false;
+                    const setValue = (v: unknown) =>
+                      onPreprocessorFieldOverrideChange?.(
+                        key,
+                        v,
+                        isRuntimeParam
+                      );
+                    const disabled =
+                      (isStreaming && !isRuntimeParam) || isLoading;
+                    return (
+                      <SchemaPrimitiveField
+                        key={key}
+                        fieldKey={key}
+                        prop={prop}
+                        value={value}
+                        onChange={setValue}
+                        disabled={disabled}
+                        label={ui.label}
+                        fieldType={
+                          typeof fieldType === "string" &&
+                          !(COMPLEX_COMPONENTS as readonly string[]).includes(
+                            fieldType
+                          )
+                            ? (fieldType as import("../lib/schemaSettings").PrimitiveFieldType)
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })()}
         </div>
 
         {/* Postprocessor Selector - fixed, always shown */}
@@ -466,6 +534,55 @@ export function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Postprocessor Schema Fields */}
+          {postprocessorIds.length > 0 &&
+            pipelines?.[postprocessorIds[0]]?.configSchema &&
+            (() => {
+              const postSchema = pipelines[postprocessorIds[0]]
+                .configSchema as unknown as import("../lib/schemaSettings").ConfigSchemaLike;
+              const postFields = parseAllFields(postSchema, inputMode);
+              if (postFields.length === 0) return null;
+              return (
+                <div className="rounded-lg border bg-card p-3 space-y-3 mt-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {pipelines[postprocessorIds[0]].name} Settings
+                  </p>
+                  {postFields.map(({ key, prop, ui, fieldType }) => {
+                    const value =
+                      postprocessorFieldOverrides?.[key] ?? prop.default;
+                    const isRuntimeParam = ui.is_load_param === false;
+                    const setValue = (v: unknown) =>
+                      onPostprocessorFieldOverrideChange?.(
+                        key,
+                        v,
+                        isRuntimeParam
+                      );
+                    const disabled =
+                      (isStreaming && !isRuntimeParam) || isLoading;
+                    return (
+                      <SchemaPrimitiveField
+                        key={key}
+                        fieldKey={key}
+                        prop={prop}
+                        value={value}
+                        onChange={setValue}
+                        disabled={disabled}
+                        label={ui.label}
+                        fieldType={
+                          typeof fieldType === "string" &&
+                          !(COMPLEX_COMPONENTS as readonly string[]).includes(
+                            fieldType
+                          )
+                            ? (fieldType as import("../lib/schemaSettings").PrimitiveFieldType)
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })()}
         </div>
 
         {/* Schema-driven configuration (when configSchema has ui.category===configuration) or legacy */}

@@ -1061,6 +1061,28 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
         }
 
+        // Merge preprocessor schema field overrides
+        if (
+          settings.preprocessorFieldOverrides &&
+          Object.keys(settings.preprocessorFieldOverrides).length > 0
+        ) {
+          loadParams = {
+            ...loadParams,
+            ...settings.preprocessorFieldOverrides,
+          };
+        }
+
+        // Merge postprocessor schema field overrides
+        if (
+          settings.postprocessorFieldOverrides &&
+          Object.keys(settings.postprocessorFieldOverrides).length > 0
+        ) {
+          loadParams = {
+            ...loadParams,
+            ...settings.postprocessorFieldOverrides,
+          };
+        }
+
         console.log(
           `Loading ${pipelineIds.length} pipeline(s) (${pipelineIds.join(", ")}) with resolution ${resolution.width}x${resolution.height}`,
           loadParams
@@ -1194,6 +1216,22 @@ export function StreamPage() {
         Object.keys(settings.schemaFieldOverrides).length > 0
       ) {
         Object.assign(initialParameters, settings.schemaFieldOverrides);
+      }
+
+      // Include preprocessor runtime field overrides
+      if (
+        settings.preprocessorFieldOverrides &&
+        Object.keys(settings.preprocessorFieldOverrides).length > 0
+      ) {
+        Object.assign(initialParameters, settings.preprocessorFieldOverrides);
+      }
+
+      // Include postprocessor runtime field overrides
+      if (
+        settings.postprocessorFieldOverrides &&
+        Object.keys(settings.postprocessorFieldOverrides).length > 0
+      ) {
+        Object.assign(initialParameters, settings.postprocessorFieldOverrides);
       }
 
       // Reset paused state when starting a fresh stream
@@ -1554,6 +1592,38 @@ export function StreamPage() {
               updateSettings({
                 schemaFieldOverrides: {
                   ...(settings.schemaFieldOverrides ?? {}),
+                  [key]: value,
+                },
+              });
+              if (isRuntimeParam && isStreaming) {
+                sendParameterUpdate({ [key]: value });
+              }
+            }}
+            preprocessorFieldOverrides={
+              settings.preprocessorFieldOverrides ?? {}
+            }
+            onPreprocessorFieldOverrideChange={(key, value, isRuntimeParam) => {
+              updateSettings({
+                preprocessorFieldOverrides: {
+                  ...(settings.preprocessorFieldOverrides ?? {}),
+                  [key]: value,
+                },
+              });
+              if (isRuntimeParam && isStreaming) {
+                sendParameterUpdate({ [key]: value });
+              }
+            }}
+            postprocessorFieldOverrides={
+              settings.postprocessorFieldOverrides ?? {}
+            }
+            onPostprocessorFieldOverrideChange={(
+              key,
+              value,
+              isRuntimeParam
+            ) => {
+              updateSettings({
+                postprocessorFieldOverrides: {
+                  ...(settings.postprocessorFieldOverrides ?? {}),
                   [key]: value,
                 },
               });

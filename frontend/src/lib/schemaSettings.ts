@@ -201,6 +201,26 @@ export function parseInputFields(
   return resolveFieldTypes(getInputFields(configSchema, inputMode));
 }
 
+/**
+ * Parse ALL fields (both "configuration" and "input" categories) with resolved fieldType.
+ * Used for preprocessor/postprocessor schemas where all fields should render in one place.
+ */
+export function parseAllFields(
+  configSchema: ConfigSchemaLike | undefined,
+  inputMode: "text" | "video" | undefined
+): ParsedFieldConfig[] {
+  const configFields = getConfigurationFields(configSchema, inputMode);
+  const inputFields = getInputFields(configSchema, inputMode);
+  const allFields = [...configFields, ...inputFields];
+  allFields.sort((a, b) => {
+    const oA = a.ui.order ?? 999;
+    const oB = b.ui.order ?? 999;
+    if (oA !== oB) return oA - oB;
+    return a.key.localeCompare(b.key);
+  });
+  return resolveFieldTypes(allFields);
+}
+
 /** Complex component names that render a single block (render once per component). "image" renders one picker per field. */
 export const COMPLEX_COMPONENTS = [
   "vace",
