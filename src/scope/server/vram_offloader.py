@@ -112,12 +112,19 @@ class VRAMOffloader:
 
     # ── Core Offload / Reload ─────────────────────────────────────
 
-    def ensure_on_gpu(self, pipeline: Any, pipeline_id: str) -> Any:
+    def ensure_on_gpu(
+        self,
+        pipeline: Any,
+        pipeline_id: str,
+        pipelines: dict[str, Any] | None = None,
+    ) -> Any:
         """Ensure a pipeline's models are on GPU, reloading from CPU if needed.
 
         Args:
             pipeline: The pipeline instance (torch.nn.Module subclass).
             pipeline_id: Unique pipeline identifier.
+            pipelines: Optional dict of all loaded pipelines (needed for OOM
+                       eviction — without it, eviction cannot move weights).
 
         Returns:
             The pipeline (same object, now on GPU).
@@ -139,16 +146,21 @@ class VRAMOffloader:
         try:
             pipeline.to(self._device)
             elapsed = time.monotonic() - start
-            logger.info(
-                "Offloader: reloaded %s to GPU in %.2fs", pipeline_id, elapsed
-            )
+            logger.info("Offloader: reloaded %s to GPU in %.2fs", pipeline_id, elapsed)
         except torch.cuda.OutOfMemoryError:
             logger.error(
                 "Offloader: OOM reloading %s to GPU — attempting eviction first",
                 pipeline_id,
             )
-            # Try evicting something else, then retry
-            self._evict_one_idle(exclude={pipeline_id})
+            # Evict an idle pipeline and actually move its weights to CPU
+            evicted_pid = self._evict_one_idle(exclude={pipeline_id})
+            if evicted_pid and pipelines and evicted_pid in pipelines:
+                evicted = pipelines[evicted_pid]
+                evicted.to(torch.device("cpu"))
+                torch.cuda.empty_cache()
+                logger.info(
+                    "Offloader: evicted %s to CPU for OOM recovery", evicted_pid
+                )
             pipeline.to(self._device)
 
         with self._lock:
@@ -196,9 +208,7 @@ class VRAMOffloader:
                 rec.location = DeviceLocation.CPU
                 rec.last_accessed = time.monotonic()
 
-        logger.info(
-            "Offloader: offloaded %s to CPU in %.2fs", pipeline_id, elapsed
-        )
+        logger.info("Offloader: offloaded %s to CPU in %.2fs", pipeline_id, elapsed)
         return pipeline
 
     # ── Automatic Eviction ────────────────────────────────────────
@@ -308,9 +318,7 @@ class VRAMOffloader:
                     "location": rec.location.value,
                     "is_active": rec.is_active,
                     "last_accessed": rec.last_accessed,
-                    "measured_vram_mb": round(
-                        rec.measured_vram_bytes / (1024**2), 1
-                    ),
+                    "measured_vram_mb": round(rec.measured_vram_bytes / (1024**2), 1),
                 }
                 for rec in self._records.values()
             ]

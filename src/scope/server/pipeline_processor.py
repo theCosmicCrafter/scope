@@ -109,6 +109,10 @@ class PipelineProcessor:
         # the next pipeline in the chain can consume them
         self.throttler = PipelineThrottler()
 
+        # OOM recovery: cap consecutive retries to prevent infinite loops
+        self._oom_consecutive_count = 0
+        self._oom_max_retries = 3
+
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
 
@@ -513,6 +517,9 @@ class PipelineProcessor:
             if video_input is not None and self.next_processor is not None:
                 self.throttler.throttle()
 
+            # Successful chunk — reset OOM retry counter
+            self._oom_consecutive_count = 0
+
         except Exception as e:
             if self._is_recoverable(e):
                 logger.error(
@@ -562,16 +569,27 @@ class PipelineProcessor:
             output_fps = self.current_output_fps
         return min(MAX_FPS, output_fps)
 
-    @staticmethod
-    def _is_recoverable(error: Exception) -> bool:
+    def _is_recoverable(self, error: Exception) -> bool:
         """Check if an error is recoverable.
 
         For OOM errors, attempts partial recovery by clearing CUDA cache
         and running garbage collection.  Returns True to allow a retry on
         the next chunk rather than killing the stream immediately.
+        Caps consecutive OOM retries to prevent infinite loops.
         """
         if isinstance(error, torch.cuda.OutOfMemoryError):
-            logger.warning("CUDA OOM detected — clearing cache for recovery attempt")
+            self._oom_consecutive_count += 1
+            if self._oom_consecutive_count > self._oom_max_retries:
+                logger.error(
+                    "CUDA OOM: exceeded %d consecutive retries — giving up",
+                    self._oom_max_retries,
+                )
+                return False
+            logger.warning(
+                "CUDA OOM detected (attempt %d/%d) — clearing cache for recovery",
+                self._oom_consecutive_count,
+                self._oom_max_retries,
+            )
             try:
                 import gc
 
@@ -579,8 +597,10 @@ class PipelineProcessor:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
                 logger.info("OOM recovery: CUDA cache cleared, will retry next chunk")
-                return True  # Allow retry on next chunk
+                return True
             except Exception as recovery_err:
                 logger.error(f"OOM recovery failed: {recovery_err}")
                 return False
+        # Reset OOM counter on non-OOM errors (successful processing resets it too)
+        self._oom_consecutive_count = 0
         return True

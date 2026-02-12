@@ -11,6 +11,7 @@ from aiortc.mediastreams import VideoFrame
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
+from .vram_monitor import get_vram_monitor
 from .vram_offloader import get_vram_offloader
 
 if TYPE_CHECKING:
@@ -893,14 +894,21 @@ class FrameProcessor:
                 logger.info(f"[VRAM-BUDGET] Chain OK: {msg}")
             else:
                 logger.warning(f"[VRAM-BUDGET] Chain tight: {msg}")
-                # Trigger offloader to free space for the chain
-                estimated_bytes = int(
-                    monitor.estimate_chain_vram_gb(self.pipeline_ids) * (1024**3)
+                # Calculate only the NEW VRAM needed (exclude already-loaded)
+                total_est_gb = monitor.estimate_chain_vram_gb(self.pipeline_ids)
+                records = monitor.get_pipeline_records()
+                already_loaded_gb = sum(
+                    rec.measured_vram_bytes / (1024**3)
+                    for pid in self.pipeline_ids
+                    if (rec := records.get(pid)) is not None
+                    and rec.measured_vram_bytes > 0
                 )
+                new_vram_gb = max(0.0, total_est_gb - already_loaded_gb)
+                needed_bytes = int(new_vram_gb * (1024**3))
                 offloader = get_vram_offloader()
                 available_pipelines = self.pipeline_manager.get_loaded_pipelines()
                 offloader.ensure_headroom(
-                    needed_bytes=estimated_bytes,
+                    needed_bytes=needed_bytes,
                     pipelines=available_pipelines,
                 )
 

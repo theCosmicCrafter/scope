@@ -13,6 +13,7 @@ from omegaconf import OmegaConf
 
 from .kafka_publisher import publish_event
 from .vram_monitor import get_vram_monitor
+from .vram_offloader import get_vram_offloader
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,11 @@ class PipelineManager:
             pipeline = self._pipelines[pipeline_id]
 
         # Ensure pipeline is on GPU (no-op if already there)
-        get_vram_offloader().ensure_on_gpu(pipeline, pipeline_id)
+        with self._lock:
+            all_pipelines = dict(self._pipelines)
+        get_vram_offloader().ensure_on_gpu(
+            pipeline, pipeline_id, pipelines=all_pipelines
+        )
         return pipeline
 
     async def _load_pipeline_by_id(
