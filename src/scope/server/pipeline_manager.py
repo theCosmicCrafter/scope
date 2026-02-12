@@ -196,8 +196,30 @@ class PipelineManager:
         )
 
         try:
+            # Snapshot VRAM before loading to measure delta
+            vram_monitor = get_vram_monitor()
+            snap_before = vram_monitor.snapshot()
+
             # Load the pipeline synchronously
             pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
+
+            # Snapshot VRAM after loading and record the delta
+            snap_after = vram_monitor.snapshot()
+            vram_delta = snap_after.used_bytes - snap_before.used_bytes
+
+            # Get estimated VRAM from pipeline config (informational)
+            estimated_vram_gb = None
+            try:
+                config_class = pipeline.get_config_class()
+                estimated_vram_gb = getattr(config_class, "estimated_vram_gb", None)
+            except Exception:
+                pass
+
+            vram_monitor.record_pipeline_load(
+                pipeline_id,
+                vram_delta_bytes=vram_delta,
+                estimated_vram_gb=estimated_vram_gb,
+            )
 
             # Hold lock while updating state
             with self._lock:
@@ -212,6 +234,7 @@ class PipelineManager:
             metadata = {
                 "load_duration_ms": load_duration_ms,
                 "load_start_time_ms": load_start_time,
+                "vram_delta_mb": round(vram_delta / (1024**2), 1),
             }
             if load_params:
                 metadata["load_params"] = load_params
@@ -601,6 +624,9 @@ class PipelineManager:
                 logger.info("CUDA cache cleared")
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")
+
+        # Update VRAM monitor
+        get_vram_monitor().record_pipeline_unload(pipeline_id)
 
         # Publish pipeline_unloaded event
         publish_event(
