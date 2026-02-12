@@ -46,6 +46,9 @@ Key files:
 - **`server/app.py`**: Main FastAPI application entry point
 - **`server/pipeline_manager.py`**: Manages pipeline lifecycle with lazy loading
 - **`server/webrtc.py`**: WebRTC streaming implementation
+- **`server/vram_monitor.py`**: Singleton GPU memory monitor with per-pipeline VRAM tracking
+- **`server/vram_offloader.py`**: Smart GPU/CPU model placement with LRU eviction
+- **`server/pipeline_processor.py`**: Per-pipeline frame processing with OOM recovery
 - **`core/pipelines/`**: Video generation pipelines (each in its own directory)
   - `interface.py`: Abstract `Pipeline` base class - all pipelines implement `__call__()`
   - `registry.py`: Registry pattern for dynamic pipeline discovery
@@ -73,6 +76,7 @@ Electron main process → spawns Python backend → waits for health check → l
 - **Lazy Loading**: Pipelines load on demand via `PipelineManager`
 - **Thread Safety**: Reentrant locks protect pipeline access
 - **Pydantic Configs**: Type-safe configuration using Pydantic models
+- **VRAM Management**: Singleton `VRAMMonitor` + `VRAMOffloader` track GPU memory and auto-offload idle pipelines to CPU via LRU eviction when VRAM is tight
 
 ### Additional Documentation
 
