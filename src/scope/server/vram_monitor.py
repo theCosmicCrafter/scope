@@ -178,6 +178,92 @@ class VRAMMonitor:
     def total_pipeline_vram_gb(self) -> float:
         return self.total_pipeline_vram_bytes() / (1024**3)
 
+    # ── Budget / Chain Estimation ───────────────────────────────────
+
+    def estimate_chain_vram_gb(self, pipeline_ids: list[str]) -> float:
+        """Estimate total VRAM needed for a pipeline chain.
+
+        Uses measured VRAM for already-loaded pipelines and schema estimates
+        for unloaded ones.  Returns 0.0 if no estimates are available.
+
+        Args:
+            pipeline_ids: Ordered list of pipeline IDs in the chain.
+        """
+        total = 0.0
+        records = self.get_pipeline_records()
+
+        for pid in pipeline_ids:
+            rec = records.get(pid)
+            if rec and rec.measured_vram_bytes > 0:
+                total += rec.measured_vram_bytes / (1024**3)
+            else:
+                # Try schema estimate for unloaded pipelines
+                try:
+                    from scope.core.pipelines.registry import PipelineRegistry
+
+                    pipeline_class = PipelineRegistry.get(pid)
+                    if pipeline_class is not None:
+                        config_class = pipeline_class.get_config_class()
+                        est = getattr(config_class, "estimated_vram_gb", None)
+                        if est is not None:
+                            total += est
+                except Exception:
+                    pass
+        return total
+
+    def can_fit_chain(
+        self,
+        pipeline_ids: list[str],
+        safety_margin_gb: float = 1.0,
+    ) -> tuple[bool, str]:
+        """Check whether a pipeline chain can fit in available VRAM.
+
+        Args:
+            pipeline_ids: Pipeline IDs to check.
+            safety_margin_gb: Extra headroom to reserve beyond the estimate.
+
+        Returns:
+            (fits, message) — fits is True if the chain should fit,
+            message explains the reasoning.
+        """
+        if not self._cuda_available:
+            return True, "No GPU — running on CPU"
+
+        snap = self.snapshot()
+        total_gb = snap.total_gb
+        estimated_gb = self.estimate_chain_vram_gb(pipeline_ids)
+
+        if estimated_gb == 0.0:
+            return True, "No VRAM estimates available — allowing load"
+
+        # Already-loaded pipelines don't need additional VRAM
+        records = self.get_pipeline_records()
+        already_loaded_gb = sum(
+            rec.measured_vram_bytes / (1024**3)
+            for pid in pipeline_ids
+            if (rec := records.get(pid)) is not None and rec.measured_vram_bytes > 0
+        )
+        new_vram_needed = estimated_gb - already_loaded_gb
+
+        if new_vram_needed <= 0:
+            return True, "All pipelines already loaded"
+
+        available = snap.free_gb
+        fits = available >= (new_vram_needed + safety_margin_gb)
+
+        if fits:
+            msg = (
+                f"Chain needs ~{new_vram_needed:.1f} GB new VRAM, "
+                f"{available:.1f} GB free (total estimate {estimated_gb:.1f} GB)"
+            )
+        else:
+            msg = (
+                f"Chain needs ~{new_vram_needed:.1f} GB new VRAM but only "
+                f"{available:.1f} GB free ({total_gb:.1f} GB total). "
+                f"Offloader will attempt to free space."
+            )
+        return fits, msg
+
     # ── Status Dict (for API) ─────────────────────────────────────
 
     def get_status(self) -> dict[str, Any]:

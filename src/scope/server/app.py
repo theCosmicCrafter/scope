@@ -1188,6 +1188,40 @@ async def get_vram_status():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.post("/api/v1/hardware/vram/check")
+async def check_vram_budget(request: Request):
+    """Pre-flight check: can a pipeline chain fit in available VRAM?
+
+    Accepts JSON body: {"pipeline_ids": ["id1", "id2", ...]}
+    Returns: {"fits": bool, "message": str, "estimated_vram_gb": float}
+    """
+    from .vram_monitor import get_vram_monitor
+
+    try:
+        body = await request.json()
+        pipeline_ids = body.get("pipeline_ids", [])
+        if not pipeline_ids:
+            return {
+                "fits": True,
+                "message": "No pipelines specified",
+                "estimated_vram_gb": 0.0,
+            }
+
+        monitor = get_vram_monitor()
+        fits, message = monitor.can_fit_chain(pipeline_ids)
+        estimated = monitor.estimate_chain_vram_gb(pipeline_ids)
+
+        return {
+            "fits": fits,
+            "message": message,
+            "estimated_vram_gb": round(estimated, 2),
+            "pipeline_ids": pipeline_ids,
+        }
+    except Exception as e:
+        logger.error(f"Error checking VRAM budget: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/keys", response_model=ApiKeysListResponse)
 async def list_api_keys():
     """List all registered API key services with their status."""

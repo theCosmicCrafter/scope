@@ -81,6 +81,14 @@ class PipelineManager:
                 )
             return self._pipeline
 
+    def get_loaded_pipelines(self) -> dict[str, Any]:
+        """Return a snapshot of all loaded pipeline instances (thread-safe).
+
+        Used by the VRAM offloader to access pipeline objects for device moves.
+        """
+        with self._lock:
+            return dict(self._pipelines)
+
     def get_pipeline_by_id(self, pipeline_id: str):
         """Get a pipeline instance by ID (thread-safe).
 

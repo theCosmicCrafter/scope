@@ -564,7 +564,23 @@ class PipelineProcessor:
 
     @staticmethod
     def _is_recoverable(error: Exception) -> bool:
-        """Check if an error is recoverable."""
+        """Check if an error is recoverable.
+
+        For OOM errors, attempts partial recovery by clearing CUDA cache
+        and running garbage collection.  Returns True to allow a retry on
+        the next chunk rather than killing the stream immediately.
+        """
         if isinstance(error, torch.cuda.OutOfMemoryError):
-            return False
+            logger.warning("CUDA OOM detected — clearing cache for recovery attempt")
+            try:
+                import gc
+
+                gc.collect()
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.info("OOM recovery: CUDA cache cleared, will retry next chunk")
+                return True  # Allow retry on next chunk
+            except Exception as recovery_err:
+                logger.error(f"OOM recovery failed: {recovery_err}")
+                return False
         return True

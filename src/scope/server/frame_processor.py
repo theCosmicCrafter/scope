@@ -11,6 +11,7 @@ from aiortc.mediastreams import VideoFrame
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
+from .vram_offloader import get_vram_offloader
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -877,10 +878,31 @@ class FrameProcessor:
         """Create pipeline processor chain (synchronous).
 
         Assumes all pipelines are already loaded by the pipeline manager.
+        Performs a VRAM budget check before setup and triggers offloading
+        if the chain won't fit.
         """
         if not self.pipeline_ids:
             logger.error("No pipeline IDs provided")
             return
+
+        # Pre-flight VRAM budget check for the entire chain
+        if len(self.pipeline_ids) > 1:
+            monitor = get_vram_monitor()
+            fits, msg = monitor.can_fit_chain(self.pipeline_ids)
+            if fits:
+                logger.info(f"[VRAM-BUDGET] Chain OK: {msg}")
+            else:
+                logger.warning(f"[VRAM-BUDGET] Chain tight: {msg}")
+                # Trigger offloader to free space for the chain
+                estimated_bytes = int(
+                    monitor.estimate_chain_vram_gb(self.pipeline_ids) * (1024**3)
+                )
+                offloader = get_vram_offloader()
+                available_pipelines = self.pipeline_manager.get_loaded_pipelines()
+                offloader.ensure_headroom(
+                    needed_bytes=estimated_bytes,
+                    pipelines=available_pipelines,
+                )
 
         # Create pipeline processors (each creates its own queues)
         for pipeline_id in self.pipeline_ids:
