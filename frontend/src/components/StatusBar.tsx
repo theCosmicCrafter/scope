@@ -1,3 +1,5 @@
+import { VRAMDashboard } from "./VRAMDashboard";
+
 interface StatusBarProps {
   className?: string;
   fps?: number;
@@ -38,8 +40,9 @@ export function StatusBar({ className = "", fps, bitrate }: StatusBarProps) {
 
   return (
     <div
-      className={`border-t bg-muted/30 px-6 py-2 flex items-center justify-end flex-shrink-0 ${className}`}
+      className={`border-t bg-muted/30 px-6 py-2 flex items-center justify-between flex-shrink-0 ${className}`}
     >
+      <VRAMDashboard />
       <div className="flex items-center gap-6">
         <MetricItem label="FPS" value={fpsValue} />
         <MetricItem label="Bitrate" value={bitrateValue} />
