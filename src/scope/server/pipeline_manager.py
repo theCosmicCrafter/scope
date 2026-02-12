@@ -12,6 +12,7 @@ import torch
 from omegaconf import OmegaConf
 
 from .kafka_publisher import publish_event
+from .vram_monitor import get_vram_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +84,14 @@ class PipelineManager:
     def get_pipeline_by_id(self, pipeline_id: str):
         """Get a pipeline instance by ID (thread-safe).
 
+        If the pipeline was offloaded to CPU, it is transparently reloaded
+        to GPU before being returned.
+
         Args:
             pipeline_id: ID of the pipeline to retrieve
 
         Returns:
-            Pipeline instance
+            Pipeline instance (on GPU)
 
         Raises:
             PipelineNotAvailableException: If pipeline is not loaded
@@ -102,7 +106,11 @@ class PipelineManager:
                 raise PipelineNotAvailableException(
                     f"Pipeline {pipeline_id} not available. Status: {status.value}"
                 )
-            return self._pipelines[pipeline_id]
+            pipeline = self._pipelines[pipeline_id]
+
+        # Ensure pipeline is on GPU (no-op if already there)
+        get_vram_offloader().ensure_on_gpu(pipeline, pipeline_id)
+        return pipeline
 
     async def _load_pipeline_by_id(
         self,
@@ -196,6 +204,27 @@ class PipelineManager:
         )
 
         try:
+            # Attempt to free VRAM if needed before loading
+            offloader = get_vram_offloader()
+            estimated_bytes = 0
+            try:
+                from scope.core.pipelines.registry import PipelineRegistry
+
+                pipeline_class = PipelineRegistry.get(pipeline_id)
+                config_class = pipeline_class.get_config_class()
+                est_gb = getattr(config_class, "estimated_vram_gb", None)
+                if est_gb is not None:
+                    estimated_bytes = int(est_gb * (1024**3))
+            except Exception:
+                pass
+
+            with self._lock:
+                available_pipelines = dict(self._pipelines)
+            offloader.ensure_headroom(
+                needed_bytes=estimated_bytes,
+                pipelines=available_pipelines,
+            )
+
             # Snapshot VRAM before loading to measure delta
             vram_monitor = get_vram_monitor()
             snap_before = vram_monitor.snapshot()
@@ -219,6 +248,12 @@ class PipelineManager:
                 pipeline_id,
                 vram_delta_bytes=vram_delta,
                 estimated_vram_gb=estimated_vram_gb,
+            )
+
+            # Register with offloader for smart GPU/CPU placement
+            offloader.register_pipeline(
+                pipeline_id,
+                measured_vram_bytes=max(0, vram_delta),
             )
 
             # Hold lock while updating state
@@ -625,8 +660,9 @@ class PipelineManager:
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")
 
-        # Update VRAM monitor
+        # Update VRAM monitor and offloader
         get_vram_monitor().record_pipeline_unload(pipeline_id)
+        get_vram_offloader().unregister_pipeline(pipeline_id)
 
         # Publish pipeline_unloaded event
         publish_event(

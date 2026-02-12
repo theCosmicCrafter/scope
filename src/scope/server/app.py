@@ -1174,12 +1174,15 @@ async def get_vram_status():
     """Get detailed VRAM status with per-pipeline memory tracking.
 
     Returns real-time GPU memory usage, per-pipeline VRAM deltas measured
-    at load time, and aggregate utilization metrics.
+    at load time, offloader placement info, and aggregate utilization metrics.
     """
     from .vram_monitor import get_vram_monitor
+    from .vram_offloader import get_vram_offloader
 
     try:
-        return get_vram_monitor().get_status()
+        status = get_vram_monitor().get_status()
+        status["offloader"] = get_vram_offloader().get_status()
+        return status
     except Exception as e:
         logger.error(f"Error getting VRAM status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

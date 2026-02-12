@@ -191,6 +191,11 @@ class FrameProcessor:
             self.running = False
             return
 
+        # Mark all pipelines as active so offloader won't evict them
+        offloader = get_vram_offloader()
+        for pid in self.pipeline_ids:
+            offloader.mark_active(pid)
+
         logger.info(
             f"[FRAME-PROCESSOR] Started with {len(self.pipeline_ids)} pipeline(s): {self.pipeline_ids}"
         )
@@ -211,6 +216,11 @@ class FrameProcessor:
             return
 
         self.running = False
+
+        # Mark all pipelines as idle so offloader can reclaim VRAM
+        offloader = get_vram_offloader()
+        for pid in self.pipeline_ids:
+            offloader.mark_idle(pid)
 
         # Stop all pipeline processors
         for processor in self.pipeline_processors:
