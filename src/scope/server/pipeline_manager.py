@@ -264,9 +264,11 @@ class PipelineManager:
             )
 
             # Register with offloader for smart GPU/CPU placement
+            # Pass pipeline so offloader can detect WAN components (VAE, generator, text_encoder)
             offloader.register_pipeline(
                 pipeline_id,
                 measured_vram_bytes=max(0, vram_delta),
+                pipeline=pipeline,
             )
 
             # Hold lock while updating state

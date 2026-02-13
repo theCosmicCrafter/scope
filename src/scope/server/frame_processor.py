@@ -193,9 +193,16 @@ class FrameProcessor:
             self.running = False
             return
 
-        # Mark all pipelines as active so offloader won't evict them
+        # Mark all pipelines as active so offloader won't evict them.
+        # Also reload any components that were offloaded to CPU while idle
+        # (e.g. text_encoder, generator) back to GPU for streaming.
         offloader = get_vram_offloader()
         for pid in self.pipeline_ids:
+            try:
+                pipeline = self.pipeline_manager.get_pipeline_by_id(pid)
+                offloader.ensure_components_on_gpu(pid, pipeline)
+            except Exception:
+                pass
             offloader.mark_active(pid)
 
         logger.info(
@@ -219,10 +226,16 @@ class FrameProcessor:
 
         self.running = False
 
-        # Mark all pipelines as idle so offloader can reclaim VRAM
+        # Mark all pipelines as idle so offloader can reclaim VRAM.
+        # Pass pipeline instance so offloader can do component-level offloading
+        # (text_encoder + generator to CPU, VAE stays on GPU).
         offloader = get_vram_offloader()
         for pid in self.pipeline_ids:
-            offloader.mark_idle(pid)
+            try:
+                pipeline = self.pipeline_manager.get_pipeline_by_id(pid)
+                offloader.mark_idle(pid, pipeline=pipeline)
+            except Exception:
+                offloader.mark_idle(pid)
 
         # Stop all pipeline processors
         for processor in self.pipeline_processors:
